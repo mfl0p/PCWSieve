@@ -1,6 +1,6 @@
 /*
 	PCWSieve
-	Bryan Little, Feb 21 2023
+	Bryan Little, Jun 6 2025
 	
 	Search algorithm by
 	Geoffrey Reynolds, 2009
@@ -14,6 +14,7 @@
 */
 
 #include <unistd.h>
+#include <math.h>
 
 #include "boinc_api.h"
 #include "boinc_opencl.h"
@@ -27,7 +28,6 @@
 #include "setup.h"
 #include "check.h"
 
-#include "primesieve.h"
 #include "factor_proth.h"
 #include "verify_factor.h"
 #include "putil.h"
@@ -36,13 +36,6 @@
 #define RESULTS_FILENAME "factors.txt"
 #define STATE_FILENAME_A "PCWstateA.txt"
 #define STATE_FILENAME_B "PCWstateB.txt"
-
-using namespace std; 
-
-
-// 16 megabytes of device memory for factors found
-const uint32_t numresults = 1000000u;
-
 
 void handle_trickle_up(searchData & sd)
 {
@@ -449,25 +442,6 @@ void findWheelOffset(uint64_t & start, int32_t & index){
 }
 
 
-void report_solution( char * results ){
-
-	FILE * resfile = my_fopen(RESULTS_FILENAME,"a");
-
-	if( resfile == NULL ){
-		fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
-		exit(EXIT_FAILURE);
-	}
-
-	if( fprintf( resfile, "%s", results ) < 0 ){
-		fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
-		exit(EXIT_FAILURE);
-	}
-
-	fclose(resfile);
-
-}
-
-
 void getResults( progData pd, searchData & sd, sclHard hardware ){
 
 	uint64_t * h_checksum = (uint64_t *)malloc(pd.numgroups*sizeof(uint64_t));
@@ -536,7 +510,7 @@ void getResults( progData pd, searchData & sd, sclHard hardware ){
 
 	if(*h_factorcount > 0){
 
-		if(*h_factorcount > numresults){
+		if(*h_factorcount > sd.numresults){
 			fprintf(stderr,"Error: number of results (%u) overflowed array.\n", *h_factorcount);
 			exit(EXIT_FAILURE);
 		}
@@ -565,21 +539,20 @@ void getResults( progData pd, searchData & sd, sclHard hardware ){
 					uint64_t a = (h_factorP[j]<0)?-h_factorP[j]:h_factorP[j];
 					uint64_t b = (h_factorP[j+1]<0)?-h_factorP[j+1]:h_factorP[j+1];
 					if (a > b){
-						swap(h_factorP[j], h_factorP[j+1]);
-						swap(h_factorKN[j], h_factorKN[j+1]);
+						std::swap(h_factorP[j], h_factorP[j+1]);
+						std::swap(h_factorKN[j], h_factorKN[j+1]);
 					}
 				}
 			}
 		}
 
-		char buffer[256];
-		char * resbuff = (char *)malloc( *h_factorcount * sizeof(char) * 256 );
-		if( resbuff == NULL ){
-			fprintf(stderr,"malloc error\n");
-			exit(EXIT_FAILURE);
 
+		FILE * resfile = my_fopen(RESULTS_FILENAME,"a");
+
+		if( resfile == NULL ){
+			fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+			exit(EXIT_FAILURE);
 		}
-		resbuff[0] = '\0';
 
 		for(uint32_t m=0; m<*h_factorcount; ++m){
 
@@ -603,11 +576,10 @@ void getResults( progData pd, searchData & sd, sclHard hardware ){
 					// check the factor actually divides the number
 					if(verify_factor(p,k,n,c)){
 						++sd.factorcount;
-						if ( sprintf( buffer, "%" PRIu64 " | %u*2^%u%+d\n",p,k,n,c) < 0 ){
-							fprintf(stderr,"error in sprintf()\n");
+						if( fprintf( resfile, "%" PRIu64 " | %u*2^%u%+d\n",p,k,n,c) < 0 ){
+							fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 							exit(EXIT_FAILURE);
-						}	
-						strcat( resbuff, buffer );
+						}						
 						// add the factor to checksum
 						sd.checksum += k;
 						sd.checksum += n;
@@ -630,11 +602,10 @@ void getResults( progData pd, searchData & sd, sclHard hardware ){
 						// check the factor actually divides the number
 						if(verify_factor(p,k,n,c)){
 							++sd.factorcount;
-							if ( sprintf( buffer, "%" PRIu64 " | %u*2^%u%+d\n",p,k,n,c) < 0 ){
-								fprintf(stderr,"error in sprintf()\n");
+							if( fprintf( resfile, "%" PRIu64 " | %u*2^%u%+d\n",p,k,n,c) < 0 ){
+								fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 								exit(EXIT_FAILURE);
-							}	
-							strcat( resbuff, buffer );
+							}								
 							// add the factor to checksum
 							sd.checksum += k;
 							sd.checksum += n;
@@ -651,11 +622,10 @@ void getResults( progData pd, searchData & sd, sclHard hardware ){
 
 		}
 
-		report_solution( resbuff );
+		fclose(resfile);
 
 		free(h_factorP);
 		free(h_factorKN);
-		free(resbuff);
 	}
 
 	free(h_flag);
@@ -824,6 +794,15 @@ void setupSearch(searchData & sd){
 
 	// for checkpoints
 	sd.workunit = sd.pmin + sd.pmax + (uint64_t)sd.nmin + (uint64_t)sd.nmax + (uint64_t)sd.kmin + (uint64_t)sd.kmax;
+	
+	// increase result buffer at low P range
+	// it's still possible to overflow this with a fast GPU and large search range
+	if(sd.pmin < 0xFFFFFFFF){
+		sd.numresults = 30000000;
+	}
+	else{
+		sd.numresults = 1000000;
+	}
 
 
 }
@@ -846,17 +825,12 @@ void profileGPU(progData & pd, searchData sd, sclHard hardware, int debuginfo ){
 
 	uint64_t prof_start = sd.p;
 
-	// don't profile at very low N
-	if(prof_start < 100000000){
-		prof_start = 100000000;
-	}
-
 	uint64_t prof_stop = prof_start + calc_range;
 
 	sclSetGlobalSize( pd.getsegprimes, (calc_range/60)+1 );
 
 	// get a count of primes in the gpu worksize
-	uint64_t prof_range_primes = primesieve_count_primes( prof_start, prof_stop );
+	uint64_t prof_range_primes = (prof_stop / log(prof_stop)) - (prof_start / log(prof_start));
 
 	// calculate prime array size based on result
 	uint64_t prof_mem_size = (uint64_t)(1.5 * (double)prof_range_primes);
@@ -910,7 +884,8 @@ void profileGPU(progData & pd, searchData sd, sclHard hardware, int debuginfo ){
 	}
 
 	// get a count of primes in the new gpu worksize
-	uint64_t range_primes = primesieve_count_primes( prof_start, prof_start+calc_range );
+	prof_stop = prof_start+calc_range;
+	uint64_t range_primes = (prof_stop / log(prof_stop)) - (prof_start / log(prof_start));
 
 	// calculate prime array size based on result
 	uint64_t mem_size = (uint64_t)( 1.5 * (double)range_primes );
@@ -964,13 +939,13 @@ void cl_sieve( sclHard hardware, searchData & sd ){
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-        pd.d_factorP = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, numresults*sizeof(cl_long), NULL, &err );
+        pd.d_factorP = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, sd.numresults*sizeof(cl_long), NULL, &err );
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-        pd.d_factorKN = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, numresults*sizeof(cl_uint2), NULL, &err );
+        pd.d_factorKN = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, sd.numresults*sizeof(cl_uint2), NULL, &err );
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
@@ -1275,22 +1250,30 @@ void cl_sieve( sclHard hardware, searchData & sd ){
 	getResults(pd, sd, hardware);
 	checkpoint(sd);
 
+	
 	// print checksum
-	char buffer[256];
-	if(sd.factorcount == 0){
-		if( sprintf( buffer, "no factors\n%016" PRIX64 "\n", sd.checksum ) < 0 ){
-			fprintf(stderr,"error in sprintf()\n");
+	FILE * resfile = my_fopen(RESULTS_FILENAME,"a");
+
+	if(resfile == NULL){
+		fprintf(stderr,"Cannot open %s !!!\n",RESULTS_FILENAME);
+		exit(EXIT_FAILURE);
+	}
+
+	if(sd.factorcount){
+		if( fprintf( resfile, "%016" PRIX64 "\n", sd.checksum ) < 0 ){
+			fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 			exit(EXIT_FAILURE);
 		}
 	}
 	else{
-		if( sprintf( buffer, "%016" PRIX64 "\n", sd.checksum ) < 0 ){
-			fprintf(stderr,"error in sprintf()\n");
+		if( fprintf( resfile, "no factors\n%016" PRIX64 "\n", sd.checksum ) < 0 ){
+			fprintf(stderr,"Cannot write to %s !!!\n",RESULTS_FILENAME);
 			exit(EXIT_FAILURE);
 		}
 	}
-	report_solution( buffer );
 
+	fclose(resfile);
+	
 	boinc_end_critical_section();
 
 

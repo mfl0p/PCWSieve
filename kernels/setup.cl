@@ -10,7 +10,7 @@
 */
 
 
-inline ulong mulmod_REDC (const ulong a, const ulong b, const ulong N, const ulong Ns)
+ulong mulmod_REDC (const ulong a, const ulong b, const ulong N, const ulong Ns)
 {
         ulong rax, rcx;
 
@@ -51,7 +51,7 @@ inline ulong mulmod_REDC (const ulong a, const ulong b, const ulong N, const ulo
 // Special thanks to Alex Kruppa for introducing me to Montgomery REDC math!
 /* Compute a^{-1} (mod 2^(32 or 64)), according to machine's word size */
 
-inline ulong invmod2pow_ul (const ulong n)
+ulong invmod2pow_ul (const ulong n)
 {
 	ulong r;
 
@@ -73,7 +73,7 @@ inline ulong invmod2pow_ul (const ulong n)
 
 // mulmod_REDC(1, 1, N, Ns)
 // But note that mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-inline ulong onemod_REDC(const ulong N, ulong rax) {
+ulong onemod_REDC(const ulong N, ulong rax) {
 
 	ulong rcx;
 
@@ -87,13 +87,13 @@ inline ulong onemod_REDC(const ulong N, ulong rax) {
 }
 
 // Like mulmod_REDC(a, 1, N, Ns) == mulmod_REDC(1, 1, N, Ns*a).
-inline ulong mod_REDC(const ulong a, const ulong N, const ulong Ns) {
+ulong mod_REDC(const ulong a, const ulong N, const ulong Ns) {
 	return onemod_REDC(N, Ns*a);
 }
 
 
 // A Left-to-Right version of the powmod.  Calcualtes 2^-(first 6 bits), then just keeps squaring and dividing by 2 when needed.
-inline ulong invpowmod_REDClr (const ulong N, const ulong Ns, const ulong r0, const int bits, const uint nmin) {
+ulong invpowmod_REDClr (const ulong N, const ulong Ns, const ulong r0, const int bits, const uint nmin) {
 
 	int bbits = bits;
 	ulong r = r0;

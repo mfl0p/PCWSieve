@@ -1,115 +1,115 @@
+/*
 
+	getsegprimes.cl - Bryan Little 4/2025, montgomery arithmetic by Yves Gallot
 
+	generate a segment of 2-PRPs to test
+
+	Generates a list of base 2 probable primes.  These are "industrial grade primes" requiring ~7 times
+ 	fewer calculations than testing for primality.  This way we can quickly find candidate primes to
+	use for the sieve and remove 2-PRPs later on the CPU.  This compute intensive algorithm is fast on GPU
+	when compared to a memory access intensive sieve of Eratosthenes.  Implementing a SoE can require 
+	millions of memory accesses that can cause the GPU to stall for hundreds of cycles.
+
+	The following approach is used:
+
+	1) Each thread is two turns of the mod 30 wheel.  This eliminates any numbers divisible by 2, 3, or 5.
+
+	2) Using constant bit sieve arrays the numbers divisible by the small primes from 7 to 113 are removed.
+	   A set bit in the array represents a multiple of the prime.  Each thread's mod 30 wheel starting number
+	   is modulo the small prime to obtain the correct array index that will tell which of the next 32 odd numbers
+	   are divisible by the prime. Since it's a mod 30 wheel only 30 of the positions are used.  The resulting uints
+	   are bitwise ORed.  The unset bits in the uint represent numbers that aren't divisible by any of the primes from 7 to 113.
+
+	3) Each thread iterates through it's bitsieve unit using the mod 30 wheel index increment.  If a bit is
+	   not set, the number is stored to local memory using a local memory atomic counter.
+
+	4) Packing the numbers in local memory allows all threads to stay busy in the next step, which is performing
+	   a base 2 PRP test.  If the number passes the test, it is stored in global memory with an atomic counter along
+	   with other constant data that will be used in other kernels.
+	
+*/
 
 // count trailing zeros long
 // needed because ctz() is undefined in Nvidia and AMD's CL v1.1 implementation
 #define __ctzl(_X) \
 	63u - clz(_X & -_X)
 
-
 // r0 + 2^64 * r1 = a * b
-inline ulong2 mul_wide(const ulong a, const ulong b)
-{
+ulong2 mul_wide(const ulong a, const ulong b){
 	ulong2 r;
-
 #ifdef __NV_CL_C_VERSION
 	const uint a0 = (uint)(a), a1 = (uint)(a >> 32);
 	const uint b0 = (uint)(b), b1 = (uint)(b >> 32);
-
 	uint c0 = a0 * b0, c1 = mul_hi(a0, b0), c2, c3;
-
 	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c1) : "r" (a0), "r" (b1), "r" (c1));
 	asm volatile ("madc.hi.u32 %0, %1, %2, 0;" : "=r" (c2) : "r" (a0), "r" (b1));
-
 	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c2) : "r" (a1), "r" (b1), "r" (c2));
 	asm volatile ("madc.hi.u32 %0, %1, %2, 0;" : "=r" (c3) : "r" (a1), "r" (b1));
-
 	asm volatile ("mad.lo.cc.u32 %0, %1, %2, %3;" : "=r" (c1) : "r" (a1), "r" (b0), "r" (c1));
 	asm volatile ("madc.hi.cc.u32 %0, %1, %2, %3;" : "=r" (c2) : "r" (a1), "r" (b0), "r" (c2));
 	asm volatile ("addc.u32 %0, %1, 0;" : "=r" (c3) : "r" (c3));
-
 	r.s0 = upsample(c1, c0); r.s1 = upsample(c3, c2);
 #else
 	r.s0 = a * b; r.s1 = mul_hi(a, b);
 #endif
-
 	return r;
 }
 
+ulong m_mul(ulong a, ulong b, ulong p, ulong q){
+	ulong2 ab = mul_wide(a,b);
+	ulong m = ab.s0 * q;
+	ulong mp = mul_hi(m,p);
+	ulong r = ab.s1 - mp;
+	return ( ab.s1 < mp ) ? r + p : r;
+}
 
-inline ulong invert(ulong p)
-{
+ulong add(ulong a, ulong b, ulong p){
+	ulong r;
+	ulong c = (a >= p - b) ? p : 0;
+	r = a + b - c;
+	return r;
+}
+
+ulong invert(ulong p){
 	ulong p_inv = 1, prev = 0;
 	while (p_inv != prev) { prev = p_inv; p_inv *= 2 - p * p_inv; }
 	return p_inv;
 }
 
-
-inline ulong montMul(ulong a, ulong b, ulong p, ulong q)
-{
-	ulong2 ab = mul_wide(a,b);
-
-	ulong m = ab.s0 * q;
-
-	ulong mp = mul_hi(m,p);
-
-	ulong r = ab.s1 - mp;
-
-	return ( ab.s1 < mp ) ? r + p : r;
-}
-
-
-inline ulong add(ulong a, ulong b, ulong p)
-{
-	ulong r;
-
-	ulong c = (a >= p - b) ? p : 0;
-
-	r = a + b - c;
-
-	return r;
-}
-
-
-inline bool strong_prp_two(ulong N, ulong exp, ulong curBit, ulong q, ulong nmo, ulong one, int t, ulong two)
-{
+bool strong_prp_two(ulong N){
+	ulong q = invert(N);
+	ulong one = (-N) % N;
+	ulong nmo = N - one;
+	ulong two = add(one, one, N);
+	int t = __ctzl( (N-1) );
+	ulong exp = N >> t;
+	ulong curBit = 0x8000000000000000;
+	curBit >>= ( clz(exp) + 1 );
 	/* If N is prime and N = d*2^t+1, where d is odd, then either
 		1.  a^d = 1 (mod N), or
 		2.  a^(d*2^s) = -1 (mod N) for some s in 0 <= s < t    */
-
 	ulong a = two;
-
   	/* r <-- a^d mod N, assuming d odd */
-	while( curBit )
-	{
-		a = montMul(a,a,N,q);
-
+	while( curBit ){
+		a = m_mul(a,a,N,q);
 		if(exp & curBit){
 			a = add(a,a,N);
 		}
-
 		curBit >>= 1;
 	}
-
 	/* Clause 1. and s = 0 case for clause 2. */
-	if (a == one || a == nmo){
+	if(a == one || a == nmo){
 		return true;
 	}
-
 	/* 0 < s < t cases for clause 2. */
-	for (int s = 1; s < t; ++s){
-
-		a = montMul(a,a,N,q);
-
+	for(int s = 1; s < t; ++s){
+		a = m_mul(a,a,N,q);
 		if(a == nmo){
 	    		return true;
 		}
 	}
-
-
 	return false;
 }
-
 
 // 3 * wheel mod 30
 // this way we don't have to check for index wrap around
@@ -171,27 +171,29 @@ __constant uint p109[109] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
 
 __constant uint p113[113] = { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2147483648, 0, 1073741824, 0, 536870912, 0, 268435456, 0, 134217728, 0, 67108864, 0, 33554432, 0, 16777216, 0, 8388608, 0, 4194304, 0, 2097152, 0, 1048576, 0, 524288, 0, 262144, 0, 131072, 0, 65536, 0, 32768, 0, 16384, 0, 8192, 0, 4096, 0, 2048, 0, 1024, 0, 512, 0, 256, 0, 128, 0, 64, 0, 32, 0, 16, 0, 8, 0, 4, 0, 2, 0 };
 
+__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulong low, ulong high, int wheelidx, __global ulong *g_prime, __global uint *g_primecount){
 
-__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulong low, ulong high, int wheelidx, __global ulong *g_prime, __global uint *primecount){
-
-	uint x = get_global_id(0);
-	int y = get_local_id(0);
+	const uint gid = get_global_id(0);
+	const uint lid = get_local_id(0);
 	int idx = wheelidx;
-	__local ulong sieved[3840];
+	__local ulong sieved[1900];
 	__local int count;
 
-	if(y == 0){
+	if(lid == 0){
 		count = 0;
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// each thread is 2 turns of the mod 30 wheel
-	ulong P = low + (x * 60);
-
+	ulong P = low + (gid * 60);
+#ifdef CKOVERFLOW
+	if(P < low) P = high;
+#endif
 	ulong end = P + 60;
-
 	if(end > high) end = high;
-
+#ifdef CKOVERFLOW
+	if(end < P) end = high;
+#endif
 	// sieve small primes to 113, this seems optimal
 	uint bitsieve = p7[P%7] | p11[P%11] | p13[P%13] | p17[P%17] | p19[P%19] | p23[P%23] | p29[P%29] | p31[P%31]
 			| p37[P%37] | p41[P%41] | p43[P%43] | p47[P%47] | p53[P%53] | p59[P%59] | p61[P%61] | p67[P%67]
@@ -199,7 +201,6 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulo
 			| p103[P%103] | p107[P%107] | p109[P%109] | p113[P%113];
 
 	while(P < end){
-
 		if( (bitsieve & 1) == 0 ){
 			sieved[atomic_inc(&count)] = P;
 		}
@@ -207,47 +208,19 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void getsegprimes(ulo
 		int inc = wheel[idx++];
 		P += inc*2;
 		bitsieve >>= inc;
-
+#ifdef CKOVERFLOW
+		if(P < low) P = end;
+#endif
 	}
 	barrier(CLK_LOCAL_MEM_FENCE);
 
-	int cnt = count;
-
-	for(int z = 0; z < cnt; z += 256){
-
-		ulong N, nmo, exp, curBit, q, one, two, r2;
-		int t;
-
-		int pos = y + z;
-
-		if(pos < cnt){
-			N = sieved[pos];
-			nmo = N-1;
-			t = __ctzl(nmo);
-			exp = N >> t;
-			curBit = 0x8000000000000000;
-			curBit >>= ( clz(exp) + 1 );
-			q = invert(N);
-			one = (-N) % N;
-			nmo = N - one;
-			two = add(one, one, N);
-			if( strong_prp_two(N, exp, curBit, q, nmo, one, t, two) ){
-				g_prime[ atomic_inc(&primecount[0]) ] = N;
-			}
+	for(int pos = lid; pos < count; pos += 256){
+		ulong p = sieved[pos];
+		if( strong_prp_two(p) ){
+			g_prime[ atomic_inc(&g_primecount[0]) ] = p;
 		}
 	}
+
 }
-
-
-
-
-
-
-
-
-
-
-
-
 
 

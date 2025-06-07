@@ -40,7 +40,7 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(__global u
 	barrier(CLK_LOCAL_MEM_FENCE);
 
 	// local memory reduction
-	for(int s = get_local_size(0) / 2; s > 0; s >>= 1){
+	for(int s = 128; s > 0; s >>= 1){
 		if(lid < s){
 			checksum[lid] += checksum[lid + s];
 		}

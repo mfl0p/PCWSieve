@@ -20,7 +20,7 @@
 //                           0  1  2  3  4  5  6  7  8  9 10 11 12 13 14
 __constant int prime15[] = { 0, 1, 1, 0, 1, 0, 0, 1, 1, 0, 0, 1, 0, 1, 1 };
 
-inline bool goodfactor(uint uk, uint n, int c){
+bool goodfactor(uint uk, uint n, int c){
 
 	ulong k = uk;
 
@@ -36,7 +36,7 @@ inline bool goodfactor(uint uk, uint n, int c){
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
-inline ulong shiftmod_REDC (const ulong a, const ulong N, ulong rax, const uint mont_nstep, const uint nstep)
+ulong shiftmod_REDC (const ulong a, const ulong N, ulong rax, const uint mont_nstep, const uint nstep)
 {
 	ulong rcx;
 
@@ -142,7 +142,7 @@ __kernel void sievecw(__global ulong * g_P, __global ulong * g_Ps, __global ulon
 
 // For nstep == 32
 
-inline ulong mad_wide_u32 (const uint a, const uint b, ulong c) {
+ulong mad_wide_u32 (const uint a, const uint b, ulong c) {
 
 #ifdef __NV_CL_C_VERSION
 	asm volatile ("mad.wide.u32 %0, %1, %2, %0;" : "+l" (c) : "r" (a) , "r" (b));
@@ -155,7 +155,7 @@ inline ulong mad_wide_u32 (const uint a, const uint b, ulong c) {
 
 
 // Same function, for a constant NSTEP of 32.
-inline ulong shiftmod_REDC32 (ulong rcx, const ulong N, const uint rax)
+ulong shiftmod_REDC32 (ulong rcx, const ulong N, const uint rax)
 {
 	rcx >>= 32;
 
@@ -257,7 +257,7 @@ __kernel void sievecw32(__global ulong * g_P, __global ulong * g_Ps, __global ul
 
 
 // Multiply two 32-bit integers to get a 64-bit result.
-inline ulong mul_wide_u32 (const uint a, const uint b) {
+ulong mul_wide_u32 (const uint a, const uint b) {
 
 	ulong c;
 
@@ -274,7 +274,7 @@ inline ulong mul_wide_u32 (const uint a, const uint b) {
 
 // Same function for nstep < 32. (SMall.)
 // Third argument must be passed in as only the low register, as we're effectively left-shifting 32 plus a small number.
-inline ulong shiftmod_REDCsm (ulong rcx, const ulong N, uint rax, const uint sm_mont_nstep, const uint nstep)
+ulong shiftmod_REDCsm (ulong rcx, const ulong N, uint rax, const uint sm_mont_nstep, const uint nstep)
 {
 	rax <<= sm_mont_nstep;
 	rcx >>= nstep;

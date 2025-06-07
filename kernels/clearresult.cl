@@ -13,14 +13,14 @@ __kernel void clearresult(__global uint *flag, __global uint *factorcount, __glo
 
 	int i = get_global_id(0);
 
+	if(i < numgroups){
+		checksum[i] = 0;	// index 0 is total primecount between checkpoints.  index 1 to 'numgroups' are for each workgroup's checksum
+	}
+	
 	if(i == 0){
 		factorcount[0] = 0;	// # of factors found
 		flag[0] = 0;		// set to 1 if there is a gpu checksum error
 		primecount[1]=0;	// keep track of largest kernel prime count
-	}
-
-	if(i < numgroups){
-		checksum[i] = 0;	// index 0 is total primecount between checkpoints.  index 1 to 'numgroups' are for each workgroup's checksum
 	}
 
 }

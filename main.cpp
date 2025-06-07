@@ -1,6 +1,6 @@
 /*
 	PCWSieve
-	Bryan Little, Feb 21 2023
+	Bryan Little, Jun 6 2025
 	
 	Search algorithm by
 	Geoffrey Reynolds, 2009
@@ -22,7 +22,6 @@
 #include "boinc_api.h"
 #include "boinc_opencl.h"
 #include "simpleCL.h"
-#include "primesieve.h"
 #include "putil.h"
 #include "cl_sieve.h"
 
@@ -204,9 +203,16 @@ double getSysOpType()
 int main(int argc, char *argv[])
 { 
 	sclHard hardware;
-	searchData sd;
-
-	primesieve_set_num_threads(1);
+	searchData sd = {};
+	sd.write_state_a_next = true;
+//	tpsieve option -M2, change K's modulus to 2
+//	uint32_t kstep = 2;
+//	uint32_t koffset = 1;
+//	default for twin prime search
+//	uint32_t kstep = 6;
+//	uint32_t koffset = 3;	
+	sd.kstep = 2;
+	sd.koffset = 1;
 
 //	_putenv_s("CUDA_CACHE_DISABLE", "1");
 
@@ -216,10 +222,10 @@ int main(int argc, char *argv[])
         options.normal_thread_priority = true;
         boinc_init_options(&options);
 
-	fprintf(stderr, "\nPCWSieve version %s by Bryan Little, Ken Brazier, Geoffrey Reynolds\n",VERS);
+	fprintf(stderr, "\nPCWSieve v%s.%s by Bryan Little, Ken Brazier, Geoffrey Reynolds\n",VERSION_MAJOR,VERSION_MINOR);
 	fprintf(stderr, "Compiled " __DATE__ " with GCC " __VERSION__ "\n");
 	if(boinc_is_standalone()){
-		printf("PCWSieve version %s by Bryan Little, Ken Brazier, Geoffrey Reynolds\n",VERS);
+		printf("PCWSieve v%s.%s by Bryan Little, Ken Brazier, Geoffrey Reynolds\n",VERSION_MAJOR,VERSION_MINOR);
 		printf("Compiled " __DATE__ " with GCC " __VERSION__ "\n");
 
 	}
@@ -321,7 +327,7 @@ int main(int argc, char *argv[])
 
 	// check vendor and normalize compute units
 	// kernel size will be determined by profiling so this doesn't have to be accurate.
-	int computeunits = (int)CUs;
+	sd.computeunits = (int)CUs;
 	char intel_s[] = "Intel";
 	char arc_s[] = "Arc";
 	char nvidia_s[] = "NVIDIA";	
@@ -350,21 +356,16 @@ int main(int argc, char *argv[])
 
 #else
 		// linux
-		// list of gpus without video output.  datacenter or mining cards.
-		char dc0[] = "H100";
-		char dc1[] = "A100";
-		char dc2[] = "V100";
-		char dc3[] = "T4";
-		char dc4[] = "P106";
-		char dc5[] = "P104";
-		char dc6[] = "P102";
-		char dc7[] = "P100";
-		char dc8[] = "CMP";
-		char dc9[] = "A2";
-		char dc10[] = "A10";
-		char dc11[] = "A16";
-		char dc12[] = "A30";
-		char dc13[] = "A40";
+		// list of popular gpus without video output
+		char dc0[] = "P100";
+		char dc1[] = "V100";
+		char dc2[] = "T4";
+		char dc3[] = "A100";
+		char dc4[] = "L4";
+		char dc5[] = "H100";
+		char dc6[] = "H200";
+		char dc7[] = "B100";
+		char dc8[] = "B200";
 
 		if(	strstr((char*)device_name, (char*)dc0) != NULL
 			|| strstr((char*)device_name, (char*)dc1) != NULL
@@ -374,12 +375,7 @@ int main(int argc, char *argv[])
 			|| strstr((char*)device_name, (char*)dc5) != NULL
 			|| strstr((char*)device_name, (char*)dc6) != NULL
 			|| strstr((char*)device_name, (char*)dc7) != NULL
-			|| strstr((char*)device_name, (char*)dc8) != NULL
-			|| strstr((char*)device_name, (char*)dc9) != NULL
-			|| strstr((char*)device_name, (char*)dc10) != NULL
-			|| strstr((char*)device_name, (char*)dc11) != NULL
-			|| strstr((char*)device_name, (char*)dc12) != NULL
-			|| strstr((char*)device_name, (char*)dc13) != NULL){
+			|| strstr((char*)device_name, (char*)dc8) != NULL){
 			sd.compute = true;
 		}
 
@@ -389,26 +385,20 @@ int main(int argc, char *argv[])
 	else if( strstr((char*)device_vend, (char*)intel_s) != NULL ){
 
 		if( strstr((char*)device_name, (char*)arc_s) != NULL ){
-			computeunits /= 10;
+			sd.computeunits /= 10;
 		}
 		else{
-			computeunits /= 20;
+			sd.computeunits /= 20;
 	                fprintf(stderr,"Detected Intel integrated graphics\n");	
 		}
 
 	}
 	// AMD
         else{
-		computeunits /= 2;
+		sd.computeunits /= 2;
         }
 
-
-	if(computeunits < 1){
-		computeunits = 1;
-	}
-
-	sd.computeunits = computeunits;
-
+	if(!sd.computeunits) sd.computeunits++;
 	
 	if(sd.test == true){
 		run_test(hardware, sd);

@@ -2,7 +2,7 @@
 
 PCWSieve by Bryan Little
 
-A BOINC-enabled OpenCL stand-alone sieve for Proth (k·2^n+1), Cullen (n·2^n+1), and Woodall (n·2^n−1) factors.
+A BOINC-enabled OpenCL stand-alone sieve for Proth, Riesel, Cullen, and Woodall factors.
 
 +1-1 search algorithm by
 * Geoffrey Reynolds
