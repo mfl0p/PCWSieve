@@ -5,7 +5,7 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 1
-VERSION_MINOR := 0
+VERSION_MINOR := 2
 date := $(shell powershell.exe get-date -format FileDate)
 
 APP = PCWSieve-win64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date).exe
@@ -52,5 +52,5 @@ putil.o : $(SRC)
 clean :
 	del *.o
 	del kernels\*.h
-	del $(APP).exe
+	del $(APP)
 
