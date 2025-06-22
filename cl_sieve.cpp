@@ -1164,7 +1164,7 @@ void cl_sieve( sclHard hardware, searchData & sd ){
 	}
 
 	// main search loop
-	for(uint64_t stop; sd.p < sd.pmax; sd.p += pd.range){
+	for(uint64_t stop; sd.p < sd.pmax; sd.p = stop){
 
 		// clear prime count
 		sclEnqueueKernel(hardware, pd.clearn);
