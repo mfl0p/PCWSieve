@@ -10,12 +10,12 @@
 */
 
 
-__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(__global ulong * g_K, __global ulong * g_lK, __global uint * g_flag, __global uint * primecount, __global ulong * g_P, __global ulong * g_checksum, uint numgroups) {
+__kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(__global ulong *g_K, __global ulong *g_lK, __global uint *g_primecount, __global ulong *g_P, __global ulong *g_checksum, uint numgroups) {
 
 	uint gid = get_global_id(0);
 	uint lid = get_local_id(0);
 	__local ulong checksum[256];
-	uint pcnt = primecount[0];
+	uint pcnt = g_primecount[0];
 
 	if(gid < pcnt){
 
@@ -30,7 +30,7 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(__global u
 		if(my_K != last_K){
 			// printf("n %u bbits1 %d r1 %llu checksum mismatch %llu vs %llu\n",my_lastN,bbits1,r1,my_K,kpos);
 			// checksum mismatch, set flag
-			atomic_or(&g_flag[0], 1);
+			atomic_or(&g_primecount[3], 1);
 		}
 	}
 	else{
@@ -62,8 +62,8 @@ __kernel __attribute__ ((reqd_work_group_size(256, 1, 1))) void check(__global u
 		g_checksum[0] += pcnt;
 
 		// store largest kernel prime count
-		if( pcnt > primecount[1] ){
-			primecount[1] = pcnt;
+		if( pcnt > g_primecount[1] ){
+			g_primecount[1] = pcnt;
 		}
 	}
 

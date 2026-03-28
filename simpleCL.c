@@ -426,27 +426,17 @@ cl_program _sclCreateProgram( const char* program_source, cl_context context )
 	return program;
 }
 
-void _sclBuildProgram( cl_program program, cl_device_id devices, const char* pName, int opt )
+void _sclBuildProgram( cl_program program, cl_device_id devices, const char* pName, const char * options )
 {
 	cl_int err;
 	char build_c[4096];
 	
-//	err = clBuildProgram( program, 0, NULL, NULL, NULL, NULL );
+	err = clBuildProgram( program, 0, NULL, options, NULL, NULL );
 
-	if(opt){
-		err = clBuildProgram( program, 0, NULL, NULL, NULL, NULL );
-	}
-	else{
-		err = clBuildProgram( program, 0, NULL, "-cl-opt-disable", NULL, NULL );
-	}
-
-
-	// print nvidia kernel buld log
+	// print nvidia kernel build log
 //	err = clBuildProgram( program, 0, NULL, "-cl-nv-verbose", NULL, NULL );
 //	clGetProgramBuildInfo( program, devices, CL_PROGRAM_BUILD_LOG, 4096, build_c, NULL );
 //	printf( "Build Log for %s_program:\n%s\n", pName, build_c );
-
-
 
    	if ( err != CL_SUCCESS ) {
 		printf( "Error on buildProgram " );
@@ -534,12 +524,49 @@ double ProfilesclEnqueueKernel( sclHard hardware, sclSoft software) {
 }
 
 
+double ProfilesclEnqueueKernelNS( sclHard hardware, sclSoft software) {
+	cl_event myEvent;	
+	cl_int err;
+	cl_ulong time_start;
+	cl_ulong time_end;
+	double ns = 0.0;
+
+	err = clEnqueueNDRangeKernel( hardware.queue, software.kernel, 3, NULL, software.global_size, software.local_size, 0, NULL, &myEvent );
+	if ( err != CL_SUCCESS ) {
+		printf( "\nError on EnqueueKernel %s", software.kernelName );
+		fprintf(stderr, "\nError on EnqueueKernel %s", software.kernelName );
+		sclPrintErrorFlags(err); 
+	}
+
+	clWaitForEvents(1, &myEvent);
+	clGetEventProfilingInfo(myEvent, CL_PROFILING_COMMAND_START, sizeof(time_start), &time_start, NULL);
+	clGetEventProfilingInfo(myEvent, CL_PROFILING_COMMAND_END, sizeof(time_end), &time_end, NULL);
+	ns = time_end-time_start;
+
+	clReleaseEvent(myEvent);
+
+	return ns;		
+}
+
+
+
 void sclSetGlobalSize( sclSoft & software, uint64_t size ) {
 
-	software.global_size[0] = (size / software.local_size[0]) * software.local_size[0];
-	if(size > software.global_size[0]){
-		software.global_size[0] += software.local_size[0];
+	uint64_t newsize = (size / software.local_size[0]) * software.local_size[0];
+
+	if(newsize < size || newsize == 0){
+		newsize += software.local_size[0];
 	}
+
+	software.global_size[0] = newsize;
+
+}
+
+
+void sclSetGlobalSizeExact( sclSoft & software, uint64_t size ) {
+
+	software.global_size[0] = size;
+
 }
 
 
@@ -601,20 +628,9 @@ unsigned long int _sclGetMaxGlobalMemSize( cl_device_id device ){
 }
 
 
-
-// Bryan Little added opt flag to turn on/off optimizations during kernel compile
-sclSoft sclGetCLSoftware( const char* source, const char* name, sclHard hardware, int opt, int debuginfo ){
+sclSoft sclGetCLSoftware( const char* source, const char* name, sclHard hardware, const char * options ){
 
 	sclSoft software;
-
-	if(debuginfo){
-		if(opt){
-			printf("Compiling %s...\n", name);
-		}
-		else{
-			printf("Compiling %s with -cl-opt-disable...\n", name);
-		}
-	}
 
 	sprintf( software.kernelName, "%s", name);
 	
@@ -625,8 +641,7 @@ sclSoft sclGetCLSoftware( const char* source, const char* name, sclHard hardware
 	
 	/* Build the program (compile it)
    	 ############################################ */
-
-   	_sclBuildProgram( software.program, hardware.device, name, opt );
+   	_sclBuildProgram( software.program, hardware.device, name, options );
    	/* ############################################ */
    	
    	/* Create the kernel object
@@ -648,17 +663,57 @@ sclSoft sclGetCLSoftware( const char* source, const char* name, sclHard hardware
 
 	software.local_size[0] = workgroupsize;
 
-	if(debuginfo){
-		printf("\tKernel workgroup size: %u\n", (unsigned int)workgroupsize);
+	return software;
+	
+}
+
+sclSoft sclGetCLSoftwareWithCommon( const char* common, const char* source, const char* name, sclHard hardware, const char * options ){
+
+	sclSoft software;
+
+	sprintf( software.kernelName, "%s", name);
+	
+	size_t total_len = strlen(common) + strlen(source) + 1;
+	char *combined_src = (char *)malloc(total_len);
+	strcpy(combined_src, common);
+	strcat(combined_src, source);
+	
+	/* Create program objects from source
+	 ########################################################### */
+	software.program = _sclCreateProgram( (const char *)combined_src, hardware.context );
+	/* ########################################################### */
+	
+        free(combined_src);	
+	
+	/* Build the program (compile it)
+   	 ############################################ */
+   	_sclBuildProgram( software.program, hardware.device, name, options );
+   	/* ############################################ */
+   	
+   	/* Create the kernel object
+	 ########################################################################## */
+	software.kernel = _sclCreateKernel( software );
+	/* ########################################################################## */
+
+
+	cl_int err;
+	size_t workgroupsize;
+
+	err = clGetKernelWorkGroupInfo( software.kernel, hardware.device, CL_KERNEL_WORK_GROUP_SIZE, sizeof(size_t), &workgroupsize, NULL);
+
+	if ( err != CL_SUCCESS ) {
+		printf( "\nError getting kernel workgroup size\n");
+		fprintf(stderr, "Error getting kernel workgroup size\n");
+		sclPrintErrorFlags(err); 
 	}
+
+	software.local_size[0] = workgroupsize;
 
 	return software;
 	
 }
 
-
-
-void sclWriteBlocking( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer ) {
+void sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer ) {
 
 	cl_int err;
 
@@ -671,7 +726,7 @@ void sclWriteBlocking( sclHard hardware, size_t size, cl_mem buffer, void* hostP
 
 }
 
-void sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer ) {
+void sclWriteNB( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer ) {
 
 	cl_int err;
 
@@ -697,6 +752,58 @@ void sclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer ) 
 
 }
 
+void sclReadNB( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer ) {
+
+	cl_int err;
+
+	err = clEnqueueReadBuffer( hardware.queue, buffer, CL_FALSE, 0, size, hostPointer, 0, NULL, NULL );
+	if ( err != CL_SUCCESS ) {
+		printf( "\nclRead Error\n" );
+		fprintf(stderr, "\nclRead Error\n" );
+		sclPrintErrorFlags( err );
+       	}
+
+}
+
+cl_event sclReadNBEvent( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer ) {
+
+	cl_int err;
+	cl_event myEvent;	
+
+	err = clEnqueueReadBuffer( hardware.queue, buffer, CL_FALSE, 0, size, hostPointer, 0, NULL, &myEvent );
+	if ( err != CL_SUCCESS ) {
+		printf( "\nclRead Error\n" );
+		fprintf(stderr, "\nclRead Error\n" );
+		sclPrintErrorFlags( err );
+       	}
+
+	return myEvent;
+}
+
+double ProfilesclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer ) {
+	cl_event myEvent;	
+	cl_int err;
+	cl_ulong time_start;
+	cl_ulong time_end;
+	double ns = 0.0;
+
+	err = clEnqueueReadBuffer( hardware.queue, buffer, CL_TRUE, 0, size, hostPointer, 0, NULL, &myEvent );
+	if ( err != CL_SUCCESS ) {
+		printf( "\nclRead Error\n" );
+		fprintf(stderr, "\nclRead Error\n" );
+		sclPrintErrorFlags( err );
+       	}
+
+	clWaitForEvents(1, &myEvent);
+	clGetEventProfilingInfo(myEvent, CL_PROFILING_COMMAND_START, sizeof(time_start), &time_start, NULL);
+	clGetEventProfilingInfo(myEvent, CL_PROFILING_COMMAND_END, sizeof(time_end), &time_end, NULL);
+	ns = time_end-time_start;
+
+	clReleaseEvent(myEvent);
+
+	return ns;		
+}
+
 cl_int sclFinish( sclHard hardware ){
 
 	cl_int err;
@@ -720,8 +827,8 @@ void sclSetKernelArg( sclSoft software, int argnum, size_t typeSize, void *argum
 
 	err = clSetKernelArg( software.kernel, argnum, typeSize, argument );
 	if ( err != CL_SUCCESS ) {	
-		printf( "\nError clSetKernelArg number %d\n", argnum );
-		fprintf(stderr, "\nError clSetKernelArg number %d\n", argnum );
+		printf( "\nError clSetKernelArg number %d for %s\n", argnum, software.kernelName );
+		fprintf(stderr, "\nError clSetKernelArg number %d for %s\n", argnum, software.kernelName );
 		sclPrintErrorFlags( err );
 	}
 

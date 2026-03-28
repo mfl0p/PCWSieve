@@ -1,6 +1,6 @@
 /*
 	PCWSieve
-	Bryan Little, Jun 6 2025
+	Bryan Little, Mar 2026
 	
 	Search algorithm by
 	Geoffrey Reynolds, 2009
@@ -34,10 +34,10 @@ void help()
 	printf("-p #\n");
 	printf("-P #			Sieve primes -p <= p < -P < 2^62\n");
 	printf("-k #\n");
-	printf("-K #			Sieve for primes k*2^n+/-1 with -k <= k <= -K < 2^32\n");
+	printf("-K #			Sieve for primes k*2^n+/-1 with -k <= k <= -K < 2^31\n");
 	printf("-n #\n");
-	printf("-N # 			Sieve for primes k*2^n+/-1 with 65 <= -n <= n <= -N < 2^32\n");
-	printf("-c 			Search for Cullen/Woodall factors\n");
+	printf("-N # 			Sieve for primes k*2^n+/-1 with 65 <= -n <= n <= -N < 2^31\n");
+	printf("-c 			Sieve for Cullen/Woodall factors\n");
 	printf("-s or --test		Perform self test to verify proper operation of the program.\n");
 	printf("-h			Print this help\n");
         boinc_finish(EXIT_FAILURE);
@@ -46,40 +46,40 @@ void help()
 
 static const char *short_opts = "p:P:k:K:n:N:csd:h";
 
-static int parse_option(int opt, char *arg, const char *source, searchData & sd)
+static int parse_option(int opt, char *arg, const char *source, searchData & sd, workStatus & st)
 {
   int status = 0;
 
   switch (opt)
   {
     case 'p':
-      status = parse_uint64(&sd.pmin,arg,3,(UINT64_C(1)<<62)-1);
+      status = parse_uint64(&st.pmin,arg,3,(UINT64_C(1)<<62)-1);
       break;
 
     case 'P':
-      status = parse_uint64(&sd.pmax,arg,4,(UINT64_C(1)<<62)-1);
+      status = parse_uint64(&st.pmax,arg,4,(UINT64_C(1)<<62)-1);
       break;
 
     case 'k':
-      status = parse_uint(&sd.kmin,arg,1,(1U<<31)-1);
+      status = parse_uint(&st.kmin,arg,1,(1U<<31)-1);
       break;
 
     case 'K':
-      status = parse_uint(&sd.kmax,arg,1,(1U<<31)-1);
+      status = parse_uint(&st.kmax,arg,1,(1U<<31)-1);
       break;
       
     case 'n':
-      status = parse_uint(&sd.nmin,arg,65,(1U<<31)-1);
+      status = parse_uint(&st.nmin,arg,65,(1U<<31)-1);
       break;
 
     case 'N':
-      status = parse_uint(&sd.nmax,arg,65,(1U<<31)-1);
+      status = parse_uint(&st.nmax,arg,65,(1U<<31)-1);
       break;
 
     case 'c':
-      sd.cw = true;
-      fprintf(stderr,"Searching for Cullen/Woodall factors.\n");
-      printf("Searching for Cullen/Woodall factors.\n");
+      st.cw = true;
+      fprintf(stderr,"Sieving for Cullen/Woodall factors.\n");
+      printf("Sieving for Cullen/Woodall factors.\n");
       break;
 
     case 's':
@@ -114,12 +114,12 @@ static const struct option long_opts[] = {
    Non-option arguments are treated as if they belong to option zero.
    Returns the number of options processed.
  */
-static int process_args(int argc, char *argv[], searchData & sd)
+static int process_args(int argc, char *argv[], searchData & sd, workStatus & st)
 {
   int count = 0, ind = -1, opt;
 
   while ((opt = getopt_long(argc,argv,short_opts,long_opts,&ind)) != -1)
-    switch (parse_option(opt,optarg,NULL,sd))
+    switch (parse_option(opt,optarg,NULL,sd,st))
     {
       case 0:
         ind = -1;
@@ -156,7 +156,7 @@ static int process_args(int argc, char *argv[], searchData & sd)
     }
 
   while (optind < argc)
-    switch (parse_option(0,argv[optind],NULL,sd))
+    switch (parse_option(0,argv[optind],NULL,sd,st))
     {
       case 0:
         optind++;
@@ -204,6 +204,7 @@ int main(int argc, char *argv[])
 { 
 	sclHard hardware;
 	searchData sd = {};
+	workStatus st = {};
 	sd.write_state_a_next = true;
 //	tpsieve option -M2, change K's modulus to 2
 //	uint32_t kstep = 2;
@@ -236,9 +237,7 @@ int main(int argc, char *argv[])
         	fprintf(stderr, "%s ", argv[i]);
         fprintf(stderr, "\n");
 
-
-	process_args(argc,argv,sd);
-
+	process_args(argc,argv,sd,st);
 
 	cl_platform_id platform = 0;
 	cl_device_id device = 0;
@@ -401,13 +400,12 @@ int main(int argc, char *argv[])
 	if(!sd.computeunits) sd.computeunits++;
 	
 	if(sd.test == true){
-		run_test(hardware, sd);
+		run_test(hardware, sd, st);
 
 	}
 	else{
-		cl_sieve(hardware, sd);
+		cl_sieve(hardware, sd, st);
 	}
-
 
         sclReleaseClHard(hardware);
 

@@ -33,10 +33,10 @@ command line options
 * -p
 * -P		Sieve primes -p <= p < -P < 2^62
 * -k
-* -K		Sieve for primes k*2^n+/-1 with -k <= k <= -K < 2^32
+* -K		Sieve for primes k*2^n+/-1 with -k <= k <= -K < 2^31
 * -n
-* -N		Sieve for primes k*2^n+/-1 with 65 <= -n <= n <= -N < 2^32
-* -c		Search for Cullen/Woodall factors
+* -N		Sieve for primes k*2^n+/-1 with 65 <= -n <= n <= -N < 2^31
+* -c		Sieve for Cullen/Woodall factors
 * -s or --test	Perform self test to verify proper operation of the program.
 
 Program gets the OpenCL GPU device index from BOINC.  To run stand-alone, the program will

@@ -2,13 +2,18 @@
 
 	sieve kernel
 
-	Bryan Little 2/12/2023
+	Bryan Little Mar 2026
 	Ken Brazier August 2010
 
 	sieve for factors +1/-1
 
 */
 
+typedef struct {
+	ulong p;
+	uint n;
+	int k;
+} factor;
 
 // count trailing zeros
 // needed because ctz() is undefined in Nvidia and AMD's CL v1.1 implementation
@@ -42,17 +47,23 @@ bool goodfactor(uint uk, uint n, int c){
 
 }
 
+void store_factor(ulong p, uint n, uint k, int c, __global uint *g_primecount,  __global factor *g_factor){
+	uint idx = atomic_inc(&g_primecount[2]);
+	int sk = (c==1) ? k : -((int)k);
+	factor fac = { p, n, sk };
+	g_factor[idx] = fac;
+}
 
-// For any nstep.  not as fast as the 32 and SM versions below
+// For any NSTEP.  not as fast as the 32 and SM versions below due to 64 bit mul
 
 // Compute T=a<<s; m = (T*Ns)%2^64; T += m*N; if (T>N) T-= N;
 // rax is passed in as a * Ns.
-ulong shiftmod_REDC (const ulong a, const ulong N, ulong rax, const uint mont_nstep, const uint nstep)
+ulong shiftmod_REDC (const ulong a, const ulong N, ulong rax)
 {
 	ulong rcx;
 
-	rax = rax << mont_nstep; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
-	rcx = a >> nstep;
+	rax = rax << MONT_NSTEP; // So this is a*Ns*(1<<s) == (a<<s)*Ns.
+	rcx = a >> NSTEP;
 
 	rcx += ((rax != 0)?1:0);	// if rax != 0, increase rcx
 
@@ -65,23 +76,18 @@ ulong shiftmod_REDC (const ulong a, const ulong N, ulong rax, const uint mont_ns
 }
 
 
-__kernel void sieve(__global ulong * g_P, __global ulong * g_Ps, __global ulong * g_K, __global uint * primecount, __global uint2 * factorKN, __global long * factorP,
-			__global uint * factorCnt, const uint N, const uint nstep, const uint kernel_nstep, const uint mont_nstep, const uint nmax, const uint kmin,
-			const uint kmax) {
+__kernel void sieve(__global ulong *g_P, __global ulong *g_Ps, __global ulong *g_K, __global uint *g_primecount, __global factor *g_factor, 
+			const uint nstart, const uint nend) {
 
-	uint n = N;
+	uint n = nstart;
 	ulong kpos;
 	uint i;
-	uint l_nmax = n + kernel_nstep;
-	if(l_nmax > nmax) l_nmax = nmax;
-
 	uint gid = get_global_id(0);
 
-	if(gid < primecount[0]){
+	if(gid < g_primecount[0]){
 		ulong Ps = g_Ps[gid];
 		ulong k0 = g_K[gid];
 		ulong my_P = g_P[gid];
-		uint Psh = (uint)Ps;
 
 		do {
 			// Select the even one.
@@ -90,16 +96,14 @@ __kernel void sieve(__global ulong * g_P, __global ulong * g_Ps, __global ulong 
 			i = (uint)(kpos);
 			if(i != 0){
 				i = __ctz(i);
-				if(i <= nstep){
+				if(i <= NSTEP){
 					if ((((uint)(kpos >> 32))>>i) == 0) {
 						uint the_k = (uint)(kpos >> i);
 						uint the_n = n + i;
-						if (the_k >= kmin && the_k <= kmax && the_n <= l_nmax){
-							int s = (kpos==k0)?-1:1;
-							if( goodfactor(the_k, the_n, s)){
-								int I = atomic_inc(&factorCnt[0]);
-								factorP[I] = (s==1) ? (long)my_P : -((long)my_P);
-								factorKN[I] = (uint2){ the_k, the_n };
+						if (the_k >= KMIN && the_k <= KMAX && the_n < NMAX){
+							int c = (kpos==k0)?-1:1;
+							if( goodfactor(the_k, the_n, c)){
+								store_factor(my_P, the_n, the_k, c, g_primecount,  g_factor);
 							}
 						}
 					}
@@ -111,35 +115,30 @@ __kernel void sieve(__global ulong * g_P, __global ulong * g_Ps, __global ulong 
 				// i is >= 32
 				i = (uint)(kpos>>32);
 				i = __ctz(i) + 32;
-				if(i <= nstep){
+				if(i <= NSTEP){
 					uint the_k = (uint)(kpos >> i);
 					uint the_n = n + i;
-					if (the_k >= kmin && the_k <= kmax && the_n <= l_nmax){
-						int s = (kpos==k0)?-1:1;
-						if( goodfactor(the_k, the_n, s)){
-							int I = atomic_inc(&factorCnt[0]);
-							factorP[I] = (s==1) ? (long)my_P : -((long)my_P);
-							factorKN[I] = (uint2){ the_k, the_n };
+					if (the_k >= KMIN && the_k <= KMAX && the_n < NMAX){
+						int c = (kpos==k0)?-1:1;
+						if( goodfactor(the_k, the_n, c)){
+							store_factor(my_P, the_n, the_k, c, g_primecount,  g_factor);
 						}
 					}
 				}
 			}
 
 			// Proceed to the K for the next N.
-			n += nstep;
-			k0 = shiftmod_REDC(k0, my_P, ((uint)k0)*Psh, mont_nstep, nstep);
+			n += NSTEP;
+			k0 = shiftmod_REDC(k0, my_P, k0*Ps);
 
-		} while (n < l_nmax);
-
+		} while (n < nend);
 
 		g_K[gid] = k0;  // store k0 to global array
-
 	}
-
 }
 
 
-// For nstep == 32
+// For NSTEP == 32
 
 ulong mad_wide_u32 (const uint a, const uint b, ulong c) {
 
@@ -168,19 +167,15 @@ ulong shiftmod_REDC32 (ulong rcx, const ulong N, const uint rax)
 }
 
 
-__kernel void sieve32(__global ulong * g_P, __global ulong * g_Ps, __global ulong * g_K, __global uint * primecount, __global uint2 * factorKN, __global long * factorP,
-			__global uint * factorCnt, const uint N, const uint nstep, const uint kernel_nstep, const uint mont_nstep, const uint nmax, const uint kmin,
-			const uint kmax) {
+__kernel void sieve32(__global ulong *g_P, __global ulong *g_Ps, __global ulong *g_K, __global uint *g_primecount, __global factor *g_factor,
+			const uint nstart, const uint nend) {
 
 	uint i;
-	uint n = N;
+	uint n = nstart;
 	ulong kpos;
-	uint l_nmax = n + kernel_nstep;
-	if(l_nmax > nmax) l_nmax = nmax;
-
 	uint gid = get_global_id(0);
 
-	if(gid < primecount[0]){
+	if(gid < g_primecount[0]){
 		ulong Ps = g_Ps[gid];
 		ulong k0 = g_K[gid];
 		ulong my_P = g_P[gid];
@@ -196,12 +191,10 @@ __kernel void sieve32(__global ulong * g_P, __global ulong * g_Ps, __global ulon
 				if ((((uint)(kpos >> 32))>>i) == 0) {
 					uint the_k = (uint)(kpos >> i);
 					uint the_n = n + i;
-					if (the_k >= kmin && the_k <= kmax && the_n <= l_nmax){
-						int s = (kpos==k0)?-1:1;
-						if( goodfactor(the_k, the_n, s)){
-							int I = atomic_inc(&factorCnt[0]);
-							factorP[I] = (s==1) ? (long)my_P : -((long)my_P);
-							factorKN[I] = (uint2){ the_k, the_n };
+					if (the_k >= KMIN && the_k <= KMAX && the_n < NMAX){
+						int c = (kpos==k0)?-1:1;
+						if( goodfactor(the_k, the_n, c)){
+							store_factor(my_P, the_n, the_k, c, g_primecount,  g_factor);
 						}
 					}
 				}
@@ -214,12 +207,10 @@ __kernel void sieve32(__global ulong * g_P, __global ulong * g_Ps, __global ulon
 				i = __ctz(the_k) + 32;
 				if(i == 32){
 					uint the_n = n + 32;
-					if (the_k >= kmin && the_k <= kmax && the_n <= l_nmax){
-						int s = (kpos==k0)?-1:1;
-						if( goodfactor(the_k, the_n, s)){
-							int I = atomic_inc(&factorCnt[0]);
-							factorP[I] = (s==1) ? (long)my_P : -((long)my_P);
-							factorKN[I] = (uint2){ the_k, the_n };
+					if (the_k >= KMIN && the_k <= KMAX && the_n < NMAX){
+						int c = (kpos==k0)?-1:1;
+						if( goodfactor(the_k, the_n, c)){
+							store_factor(my_P, the_n, the_k, c, g_primecount,  g_factor);
 						}
 					}
 				}
@@ -228,17 +219,14 @@ __kernel void sieve32(__global ulong * g_P, __global ulong * g_Ps, __global ulon
 			n += 32;
 			k0 = shiftmod_REDC32(k0, my_P, ((uint)k0) * Psh);
 
-		} while (n < l_nmax);
-
+		} while (n < nend);
 
 		g_K[gid] = k0;  // store k0 to global array
-
 	}
-
 }
 
 
-// For nstep < 32
+// For NSTEP < 32
 
 // Multiply two 32-bit integers to get a 64-bit result.
 ulong mul_wide_u32 (const uint a, const uint b) {
@@ -256,12 +244,12 @@ ulong mul_wide_u32 (const uint a, const uint b) {
 }
 
 
-// Same function for nstep < 32. (SMall.)
+// Same function for NSTEP < 32. (SMall.)
 // Third argument must be passed in as only the low register, as we're effectively left-shifting 32 plus a small number.
-ulong shiftmod_REDCsm (ulong rcx, const ulong N, uint rax, const uint sm_mont_nstep, const uint nstep)
+ulong shiftmod_REDCsm (ulong rcx, const ulong N, uint rax)
 {
-	rax <<= sm_mont_nstep;
-	rcx >>= nstep;
+	rax <<= SM_MONT_NSTEP;
+	rcx >>= NSTEP;
 	rcx += (ulong)(mad_hi(rax, (uint)N, (uint)((rax!=0)?1:0) ) );
 
 	rcx += mul_wide_u32(rax, (uint)(N>>32));
@@ -271,20 +259,15 @@ ulong shiftmod_REDCsm (ulong rcx, const ulong N, uint rax, const uint sm_mont_ns
 }
 
 
-__kernel void sievesm(__global ulong * g_P, __global ulong * g_Ps, __global ulong * g_K, __global uint * primecount, __global uint2 * factorKN, __global long * factorP,
-			__global uint * factorCnt, const uint N, const uint nstep, const uint kernel_nstep, const uint mont_nstep, const uint nmax, const uint kmin,
-			const uint kmax) {
+__kernel void sievesm(__global ulong *g_P, __global ulong *g_Ps, __global ulong *g_K, __global uint *g_primecount, __global factor *g_factor,
+			const uint nstart, const uint nend) {
 
-	uint n = N;
+	uint n = nstart;
 	ulong kpos;
 	uint i;
-	const uint sm_mont_nstep = mont_nstep - 32;
-	uint l_nmax = n + kernel_nstep;
-	if(l_nmax > nmax) l_nmax = nmax;
-
 	uint gid = get_global_id(0);
 
-	if(gid < primecount[0]){
+	if(gid < g_primecount[0]){
 		ulong Ps = g_Ps[gid];
 		ulong k0 = g_K[gid];
 		ulong my_P = g_P[gid];
@@ -297,35 +280,30 @@ __kernel void sievesm(__global ulong * g_P, __global ulong * g_Ps, __global ulon
 			i = (uint)(kpos);
 			if(i != 0){
 				i = __ctz(i);
-				if(i <= nstep){
+				if(i <= NSTEP){
 					if ((((uint)(kpos >> 32))>>i) == 0) {
 						uint the_k = (uint)(kpos >> i);
 						uint the_n = n + i;
-						if ( the_k >= kmin && the_k <= kmax && the_n <= l_nmax ){
-							int s = (kpos==k0)?-1:1;
-							if( goodfactor(the_k, the_n, s)){
-								int I = atomic_inc(&factorCnt[0]);
-								factorP[I] = (s==1) ? (long)my_P : -((long)my_P);
-								factorKN[I] = (uint2){ the_k, the_n };
+						if ( the_k >= KMIN && the_k <= KMAX && the_n < NMAX ){
+							int c = (kpos==k0)?-1:1;
+							if( goodfactor(the_k, the_n, c)){
+								store_factor(my_P, the_n, the_k, c, g_primecount,  g_factor);
 							}
 						}
 					}
 					// if (kpos >> 32))>>i > 0, k is larger than uint.
 				}
 			}
-			// if lower 32 bits of kpos are zero, then i will be >= 32 > nstep
+			// if lower 32 bits of kpos are zero, then i will be >= 32 > NSTEP
 
 			// Proceed to the K for the next N.
-			n += nstep;
-			k0 = shiftmod_REDCsm(k0, my_P, ((uint)k0)*Psh, sm_mont_nstep, nstep);
+			n += NSTEP;
+			k0 = shiftmod_REDCsm(k0, my_P, ((uint)k0)*Psh);
 
-		} while (n < l_nmax);
-
+		} while (n < nend);
 
 		g_K[gid] = k0;  // store k0 to global array
-
 	}
-
 }
 
 

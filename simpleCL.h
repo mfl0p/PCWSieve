@@ -66,19 +66,23 @@ typedef struct {
 
 void sclGetBinary( sclSoft software );
 void sclSetGlobalSize( sclSoft & software, uint64_t size );
+void sclSetGlobalSizeExact( sclSoft & software, uint64_t size );
 
 /* ####### Device memory allocation read and write  ####### */
 
 //cl_mem 			sclMalloc( sclHard hardware, cl_int mode, size_t size );
-void			sclWriteBlocking( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
 void 			sclWrite( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
+void 			sclWriteNB( sclHard hardware, size_t size, cl_mem buffer, void* hostPointer );
+void			sclReadNB( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
+cl_event 		sclReadNBEvent( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 void			sclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
+double 			ProfilesclRead( sclHard hardware, size_t size, cl_mem buffer, void *hostPointer );
 
 /* ######################################################## */
 
 /* ####### inicialization of sclSoft structs  ############## */
-sclSoft 		sclGetCLSoftware( const char* source, const char* name, sclHard hardware, int opt, int debuginfo );
-
+sclSoft 		sclGetCLSoftware( const char* source, const char* name, sclHard hardware, const char * options );
+sclSoft 		sclGetCLSoftwareWithCommon( const char* common, const char* source, const char* name, sclHard hardware, const char * options );
 /* ######################################################## */
 
 /* ####### Release and retain OpenCL objects ############## */
@@ -100,6 +104,7 @@ void 			sclPrintErrorFlags( cl_int flag );
 void			sclEnqueueKernel( sclHard hardware, sclSoft software );
 cl_event		sclEnqueueKernelEvent( sclHard hardware, sclSoft software );
 double			ProfilesclEnqueueKernel( sclHard hardware, sclSoft software );
+double			ProfilesclEnqueueKernelNS( sclHard hardware, sclSoft software );
 
 /* ######################################################## */
 
@@ -122,7 +127,7 @@ void 			sclSetKernelArg( sclSoft software, int argnum, size_t typeSize, void *ar
 /* INTERNAL FUNCITONS */
 
 /* ####### cl software management ######################### */
-void 			_sclBuildProgram( cl_program program, cl_device_id devices, const char* pName, int opt );
+void 			_sclBuildProgram( cl_program program, cl_device_id devices, const char* pName, const char * options );
 cl_kernel 		_sclCreateKernel( sclSoft software );
 cl_program 		_sclCreateProgram( const char* program_source, cl_context context );
 char* 			_sclLoadProgramSource( const char *filename );

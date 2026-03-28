@@ -5,14 +5,14 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 1
-VERSION_MINOR := 3
+VERSION_MINOR := 4
 date := $(shell powershell.exe get-date -format FileDate)
 
 APP = PCWSieve-win64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date).exe
 
-SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/sieve.cl kernels/sievecw.cl kernels/setup.cl kernels/check.cl factor_proth.c factor_proth.h verify_factor.c verify_factor.h putil.c putil.h
+SRC = main.cpp cl_sieve.cpp cl_sieve.h simpleCL.c simpleCL.h kernels/clearn.cl kernels/clearresult.cl kernels/getsegprimes.cl kernels/sieve.cl kernels/sievecw.cl kernels/setup.cl kernels/check.cl factor_proth.c factor_proth.h verify_factor.c verify_factor.h putil.c putil.h mont.c mont.h
 KERNEL_HEADERS = kernels/clearn.h kernels/clearresult.h kernels/sieve.h kernels/sievecw.h kernels/setup.h kernels/check.h kernels/getsegprimes.h
-OBJ = main.o cl_sieve.o simpleCL.o factor_proth.o verify_factor.o putil.o
+OBJ = main.o cl_sieve.o simpleCL.o factor_proth.o verify_factor.o putil.o mont.o
 
 LIBS = OpenCL.dll
 
@@ -39,6 +39,9 @@ factor_proth.o : $(SRC)
 
 verify_factor.o : $(SRC)
 	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ verify_factor.c
+
+mont.o : $(SRC)
+	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ mont.c
 
 simpleCL.o : $(SRC)
 	$(CC) $(CFLAGS) $(OCL_INC) $(BOINC_INC) -c -o $@ simpleCL.c
