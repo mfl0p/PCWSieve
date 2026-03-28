@@ -117,7 +117,7 @@ ulong invpowmod_REDClr (const ulong N, const ulong Ns, const ulong r0, const int
 
 
 // Set up to check N's by getting in position with division only.
-__kernel void setup(__global ulong * P, __global ulong * Ps, __global ulong * K, __global ulong * lK, const ulong r0, const int bbits, const uint nmin, const ulong r1, const int bbits1, const uint lastn, __global uint * primecount ) {
+__kernel void setup(__global ulong * P, __global ulong * Ps, __global ulong * K, __global ulong * lK, __global uint * primecount ) {
 
 	uint gid = get_global_id(0);
 
@@ -128,10 +128,10 @@ __kernel void setup(__global ulong * P, __global ulong * Ps, __global ulong * K,
 		ulong my_Ps = -invmod2pow_ul (my_P); // Ns = -N^{-1} % 2^64
 
 		// Calculate k0, not in Montgomery form.
-		ulong k0 = invpowmod_REDClr(my_P, my_Ps, r0, bbits, nmin);
+		ulong k0 = invpowmod_REDClr(my_P, my_Ps, RS, BBITS, NMIN);
 
 		// calculate k for last value of N, for checksum.
-		ulong k1 = invpowmod_REDClr(my_P, my_Ps, r1, bbits1, lastn);
+		ulong k1 = invpowmod_REDClr(my_P, my_Ps, RSL, BBITSL, LASTN);
 
 		// store to global arrays
 		Ps[gid] = my_Ps;

@@ -14,8 +14,8 @@ typedef struct {
 } workStatus;
 
 typedef struct {
-	uint64_t r0, r1, lastN;
-	uint32_t nstep, mont_nstep, kernel_nstep, numresults, kstep, koffset, numgroups, psize, range;
+	uint64_t r0, r1;
+	uint32_t nstep, mont_nstep, kernel_nstep, numresults, kstep, koffset, numgroups, psize, range, lastN;
 	int32_t bbits, bbits1, computeunits;
 	bool write_state_a_next, test, compute;
 } searchData;

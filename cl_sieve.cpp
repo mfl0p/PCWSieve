@@ -935,9 +935,7 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	char cldef[256];
 	snprintf(cldef, sizeof(cldef), "-DNSTEP=%u -DMONT_NSTEP=%u -DNMAX=%u -DKMIN=%u -DKMAX=%u -DSM_MONT_NSTEP=%u",
 		sd.nstep, sd.mont_nstep, st.nmax, st.kmin, st.kmax, sd.mont_nstep-32);
-
 //	printf("%s\n", cldef);
-
 	if(st.cw){
 		if(sd.nstep == 32){
 			pd.sieve = sclGetCLSoftware(sievecw_cl,"sievecw32",hardware,cldef);
@@ -963,9 +961,14 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 
         pd.clearn = sclGetCLSoftware(clearn_cl,"clearn",hardware,NULL);
         pd.clearresult = sclGetCLSoftware(clearresult_cl,"clearresult",hardware,NULL);
-        pd.setup = sclGetCLSoftware(setup_cl,"setup",hardware,NULL);
         pd.check = sclGetCLSoftware(check_cl,"check",hardware,NULL);
         pd.getsegprimes = sclGetCLSoftware(getsegprimes_cl,"getsegprimes",hardware,NULL);
+
+	// bake constants into kernel source
+	snprintf(cldef, sizeof(cldef), "-DNMIN=%u -DLASTN=%u -DBBITS=%d -DBBITSL=%d -DRS=((ulong)%" PRIu64 ") -DRSL=((ulong)%" PRIu64 ")",
+    					st.nmin, sd.lastN, sd.bbits, sd.bbits1, sd.r0, sd.r1);
+//	printf("%s\n", cldef);
+        pd.setup = sclGetCLSoftware(setup_cl,"setup",hardware,cldef);
 
 	// kernels have __attribute__ ((reqd_work_group_size(256, 1, 1)))
 	// it's still possible the CL complier picked a different size
@@ -1080,23 +1083,16 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	sclSetKernelArg(pd.clearresult, ai++, sizeof(cl_mem), &pd.d_checksum);
 	sclSetKernelArg(pd.clearresult, ai++, sizeof(cl_mem), &pd.d_primecount);
 	sclSetKernelArg(pd.clearresult, ai++, sizeof(uint32_t), &sd.numgroups);
-
 	////////////////////////
 	sclSetKernelArg(pd.getsegprimes, 3, sizeof(cl_mem), &pd.d_primes);
 	sclSetKernelArg(pd.getsegprimes, 4, sizeof(cl_mem), &pd.d_primecount);
 	////////////////////////
-
-	sclSetKernelArg(pd.setup, 0, sizeof(cl_mem), &pd.d_primes);
-	sclSetKernelArg(pd.setup, 1, sizeof(cl_mem), &pd.d_Ps);
-	sclSetKernelArg(pd.setup, 2, sizeof(cl_mem), &pd.d_K);
-	sclSetKernelArg(pd.setup, 3, sizeof(cl_mem), &pd.d_lK);
-	sclSetKernelArg(pd.setup, 4, sizeof(uint64_t), &sd.r0);
-	sclSetKernelArg(pd.setup, 5, sizeof(int32_t), &sd.bbits);
-	sclSetKernelArg(pd.setup, 6, sizeof(uint32_t), &st.nmin);
-	sclSetKernelArg(pd.setup, 7, sizeof(uint64_t), &sd.r1);
-	sclSetKernelArg(pd.setup, 8, sizeof(int32_t), &sd.bbits1);
-	sclSetKernelArg(pd.setup, 9, sizeof(uint32_t), &sd.lastN);
-	sclSetKernelArg(pd.setup, 10, sizeof(cl_mem), &pd.d_primecount);
+	ai=0;
+	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primes);
+	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_Ps);
+	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_K);
+	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_lK);
+	sclSetKernelArg(pd.setup, ai++, sizeof(cl_mem), &pd.d_primecount);
 	////////////////////////
 	ai=0;
 	sclSetKernelArg(pd.sieve, ai++, sizeof(cl_mem), &pd.d_primes);
@@ -1104,7 +1100,6 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	sclSetKernelArg(pd.sieve, ai++, sizeof(cl_mem), &pd.d_K);
 	sclSetKernelArg(pd.sieve, ai++, sizeof(cl_mem), &pd.d_primecount);
 	sclSetKernelArg(pd.sieve, ai++, sizeof(cl_mem), &pd.d_factor);
-
 	////////////////////////
 	ai=0;
 	sclSetKernelArg(pd.check, ai++, sizeof(cl_mem), &pd.d_K);
@@ -1114,7 +1109,6 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	sclSetKernelArg(pd.check, ai++, sizeof(cl_mem), &pd.d_checksum);
 	sclSetKernelArg(pd.check, ai++, sizeof(uint32_t), &sd.numgroups);
 	////////////////////////
-
 
 	fprintf(stderr,"Starting sieve...\n");
 	if(boinc_is_standalone()){
