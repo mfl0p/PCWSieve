@@ -1,6 +1,6 @@
 /*
 	PCWSieve
-	Bryan Little, Mar 2026
+	Bryan Little, Apr 2026
 	
 	Search algorithm by
 	Geoffrey Reynolds, 2009
@@ -116,28 +116,46 @@ void format_eta(double seconds, char *buf)
     sprintf(buf, "%02d:%02d:%02d", h, m, s);
 }
 
-void print_progress(workStatus &st, double *smooth_rate, time_t start_time)
-{
+void print_progress(workStatus &st,
+                    double *smooth_rate,
+                    time_t start_time,
+                    uint64_t run_start_p){
     const int bar_width = 40;
 
-    double progress = (double)(st.p - st.pmin) / (double)(st.pmax - st.pmin);
+    uint64_t total_range = st.pmax - st.pmin;
+    uint64_t done_total  = st.p - st.pmin;
+
+    double progress = 0.0;
+    if(total_range > 0)
+        progress = (double)done_total / (double)total_range;
+
     if(progress < 0) progress = 0;
     if(progress > 1) progress = 1;
 
-    int pos = progress * bar_width;
+    int pos = (int)(progress * bar_width);
 
     time_t now = time(NULL);
     double elapsed = difftime(now, start_time);
 
-    double inst_rate = (st.p - st.pmin) / (elapsed > 0 ? elapsed : 1);
+    uint64_t done_this_run = 0;
+    if(st.p > run_start_p)
+        done_this_run = st.p - run_start_p;
 
-    /* exponential smoothing */
-    if(*smooth_rate == 0)
+    double inst_rate = (double)done_this_run / (elapsed > 0 ? elapsed : 1.0);
+
+    /*
+        Exponential smoothing.
+    */
+    if(*smooth_rate == 0.0)
         *smooth_rate = inst_rate;
     else
         *smooth_rate = 0.9 * (*smooth_rate) + 0.1 * inst_rate;
 
-    double remain = (st.pmax - st.p) / (*smooth_rate > 0 ? *smooth_rate : 1);
+    uint64_t remaining = 0;
+    if(st.pmax > st.p)
+        remaining = st.pmax - st.p;
+
+    double remain = (double)remaining / (*smooth_rate > 0.0 ? *smooth_rate : 1.0);
 
     char rate_str[32];
     char eta_str[32];
@@ -147,7 +165,7 @@ void print_progress(workStatus &st, double *smooth_rate, time_t start_time)
 
     printf("\r[");
 
-    for(int i=0;i<bar_width;i++)
+    for(int i = 0; i < bar_width; i++)
         putchar(i < pos ? '#' : '-');
 
     printf("] %6.2f%% | %s | ETA %s",
@@ -910,7 +928,7 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	}
 
 	// device arrays
-	pd.d_primecount = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, 4*sizeof(cl_uint), NULL, &err );
+	pd.d_primecount = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, 4*sizeof(cl_uint), NULL, &err );
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: d_primecount array.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
@@ -922,12 +940,10 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-
-	// map to host
-	cl_uint *h_primecount = (cl_uint*)clEnqueueMapBuffer(hardware.queue, pd.d_primecount, CL_FALSE, CL_MAP_READ, 0, 4*sizeof(cl_uint), 0, NULL, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_primecount array.\n");
-                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
+	// host
+	cl_uint * h_primecount = (cl_uint*)malloc(4 * sizeof(cl_uint));
+	if( h_primecount == NULL ){
+		fprintf(stderr,"malloc error: h_primecount\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1064,17 +1080,16 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 		exit(EXIT_FAILURE);
 	}
 
-        pd.d_checksum = clCreateBuffer( hardware.context, CL_MEM_ALLOC_HOST_PTR, sd.numgroups*sizeof(cl_ulong), NULL, &err );
+        pd.d_checksum = clCreateBuffer( hardware.context, CL_MEM_READ_WRITE, sd.numgroups*sizeof(cl_ulong), NULL, &err );
         if ( err != CL_SUCCESS ) {
 		fprintf(stderr, "ERROR: clCreateBuffer failure: d_checksum array.\n");
                 printf( "ERROR: clCreateBuffer failure.\n" );
 		exit(EXIT_FAILURE);
 	}
-	// map to host
-	cl_ulong *h_checksum = (cl_ulong*)clEnqueueMapBuffer(hardware.queue, pd.d_checksum, CL_FALSE, CL_MAP_READ, 0, sd.numgroups*sizeof(cl_ulong), 0, NULL, NULL, &err);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueMapBuffer failure: h_checksum.\n");
-                printf( "ERROR: clEnqueueMapBuffer failure.\n" );
+	// host
+	cl_ulong *h_checksum = (cl_ulong*)malloc(sd.numgroups * sizeof(cl_ulong));
+	if( h_primecount == NULL ){
+		fprintf(stderr,"malloc error: h_primecount\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -1130,6 +1145,7 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	const double irsize = 1.0 / (double)(st.pmax-st.pmin);
 	time_t start_time = time(NULL);
 	double smooth_rate = 0;
+	uint64_t run_start_p = st.p;
 
 	// main search loop
 	for(uint64_t stop; st.p < st.pmax; st.p = stop){
@@ -1146,7 +1162,7 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
     			double fd = (double)(st.p-st.pmin)*irsize;
 			boinc_fraction_done(fd);
 			if(boinc_is_standalone()){
-				print_progress(st, &smooth_rate, start_time);
+				print_progress(st, &smooth_rate, start_time, run_start_p);
 			}
 			boinc_last = time_curr;
 			int elapsed = (int)time_curr - (int)ckpt_last;
@@ -1260,20 +1276,8 @@ void cl_sieve( sclHard hardware, searchData & sd, workStatus & st ){
 	}
 
 	// cleanup
-	err = clEnqueueUnmapMemObject(hardware.queue, pd.d_primecount, h_primecount, 0, NULL, NULL);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueUnmapMemObject failure.\n");
-                printf( "ERROR: clEnqueueUnmapMemObject failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	err = clEnqueueUnmapMemObject(hardware.queue, pd.d_checksum, h_checksum, 0, NULL, NULL);
-        if ( err != CL_SUCCESS ) {
-		fprintf(stderr, "ERROR: clEnqueueUnmapMemObject failure.\n");
-                printf( "ERROR: clEnqueueUnmapMemObject failure.\n" );
-		exit(EXIT_FAILURE);
-	}
-	clFinish(hardware.queue);
-
+	free(h_primecount);
+	free(h_checksum);
 	cleanup(pd);
 	small_primes_free();
 }

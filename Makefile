@@ -5,7 +5,7 @@ LD = $(CC)
 .SUFFIXES: .o .c .h .cl .cpp
 
 VERSION_MAJOR := 2
-VERSION_MINOR := 0
+VERSION_MINOR := 1
 date := $(shell powershell.exe get-date -format FileDate)
 
 APP = PCWSieve-win64-v$(VERSION_MAJOR).$(VERSION_MINOR)-$(date).exe
